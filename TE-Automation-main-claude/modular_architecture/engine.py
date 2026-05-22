@@ -133,9 +133,22 @@ def _rdp_header_map(ws_rdp: xw.Sheet, header_row: int = 2, max_cols: int = 2000)
     last_col = min(ws_rdp.api.UsedRange.Columns.Count, max_cols)
     headers = ws_rdp.range((header_row, 1), (header_row, last_col)).value
     m: Dict[str, int] = {}
+    # The RDP has multiple "Waste" columns (one in kg, one as %, sometimes a dashboard total).
+    # The percentage Waste is always the one immediately following "ETE  %", so capture it
+    # explicitly and override the dict (which otherwise picks the last duplicate).
+    ete_idx: Optional[int] = None
+    waste_after_ete: Optional[int] = None
     for idx, h in enumerate(headers, start=1):
         if isinstance(h, str) and h.strip():
-            m[h.strip()] = idx
+            key = h.strip()
+            m[key] = idx
+            collapsed = " ".join(key.split())
+            if collapsed == "ETE %":
+                ete_idx = idx
+            elif key == "Waste" and ete_idx is not None and waste_after_ete is None:
+                waste_after_ete = idx
+    if waste_after_ete is not None:
+        m["Waste"] = waste_after_ete
     return m
 
 def _values_by_headers(ws_rdp: xw.Sheet, row: int, hdr: Dict[str, int], names: List[str]) -> List[Any]:
@@ -196,18 +209,21 @@ def pond_default_names_velprod(df: pd.DataFrame, plant: str, line: str) -> Tuple
 def pond_pc_names_velprod(df: pd.DataFrame, ws_pond: xw.Sheet, template_location: str,
                           plant: str, line: str) -> Tuple[List[str], List[float]]:
     """
-    PC needs:
-      - Product Name  : col5  => c5
-      - Product Type  : col21 => c21
-      - % Seasoning   : col22 => c22
-      - % Oil Spray   : col23 => c23
-      - Production    : col8  => c8
-    Plus PC extra params from Pond top-table (rows 2..8):
-      match location in col29, then:
-        wash temp    = col32
-        moisture aim = col33
-        surface water= col34
-        gross solids = col47  (Sólidos gross)
+    PC needs (Pond material columns):
+      - Product Name  : col5  ('Descripción')
+      - Product Type  : col21 ('Product Type', e.g. 'Flats', 'Ridged')
+      - % Seasoning   : col22 ('% sazonado')
+      - % Oil Spray   : col23 ('% oil spray Total ')
+      - Production    : col8  ('Actual Prod')
+    Plus PC extra params from Pond top-table (rows 2..8). The top-table is keyed by
+    Centro Planta (CECO) in col 28 and friendly name in col 29; we look up by CECO
+    (which we read from the material rows) so plant-name differences like
+    'Celaya' vs 'Celaya Salado' or 'Mexicali 1 PMF' vs 'Mexicali Plant' don't matter.
+    The extra params come from:
+      wash water temp = col32 ('Agua de lavador (°C)')
+      moisture aim    = col33 ('Humedad de producto')
+      surface water   = col34 ('Humedad superficial')
+      gross solids    = col47 ('Sólidos gross')
     """
     if df.empty:
         return [], []
@@ -222,26 +238,44 @@ def pond_pc_names_velprod(df: pd.DataFrame, ws_pond: xw.Sheet, template_location
         return [], []
 
     product_names = d["c5"].fillna("").astype(str).tolist()
-    product_types = d["c20"].fillna("").astype(str).tolist()  # VBA col20
+    product_types = d["c21"].fillna("").astype(str).tolist()  # Product Type ('Flats', etc.)
 
-    seasoning = pd.to_numeric(d["c21"], errors="coerce").fillna(0).tolist()  # VBA col21
-    oil_spray = pd.to_numeric(d["c22"], errors="coerce").fillna(0).tolist()  # VBA col22
-    production = pd.to_numeric(d["c8"], errors="coerce").fillna(0).tolist()
+    seasoning  = pd.to_numeric(d["c22"], errors="coerce").fillna(0).tolist()  # % sazonado
+    oil_spray  = pd.to_numeric(d["c23"], errors="coerce").fillna(0).tolist()  # % oil spray Total
+    production = pd.to_numeric(d["c8"],  errors="coerce").fillna(0).tolist()
 
-    # PC top-table parameters (rows 2..8)
+    # CECO from the material rows — disambiguates the top-table row.
+    ceco_series = pd.to_numeric(d["c1"], errors="coerce").dropna()
+    ceco = int(ceco_series.iloc[0]) if not ceco_series.empty else None
+
     loc_norm = _norm(template_location)
     found = None
-    for r in range(2, 9):
-        v_loc = ws_pond.range((r, 28)).value  # col28 = "Planta" in that top table
-        if _norm(v_loc) == loc_norm:
+    # Top-table currently runs rows 2..9, but scan a few extra rows in case
+    # more PC plants are added; we stop at the first blank CECO row.
+    for r in range(2, 16):
+        v_ceco = ws_pond.range((r, 28)).value
+        v_name = ws_pond.range((r, 29)).value
+        if v_ceco is None and v_name is None:
+            break
+        if ceco is not None and v_ceco is not None:
+            try:
+                if int(v_ceco) == ceco:
+                    found = r
+                    break
+            except (ValueError, TypeError):
+                pass
+        if _norm(v_name) == loc_norm:
             found = r
             break
     if found is None:
-        raise ValueError(f"PC extra params not found in Pond rows 2..8 for location '{template_location}'")
+        raise ValueError(
+            f"PC extra params not found in Pond rows 2..8 for location "
+            f"'{template_location}' (ceco={ceco})"
+        )
 
-    wash_temp = ws_pond.range((found, 31)).value   # col31
-    moisture  = ws_pond.range((found, 32)).value   # col32
-    surface   = ws_pond.range((found, 33)).value   # col33
+    wash_temp = ws_pond.range((found, 32)).value   # col32 (Agua de lavador)
+    moisture  = ws_pond.range((found, 33)).value   # col33 (Humedad de producto)
+    surface   = ws_pond.range((found, 34)).value   # col34 (Humedad superficial)
     gross_sol = ws_pond.range((found, 47)).value   # col47 (Sólidos gross)
 
     # names array is 2 halves (name + type)
