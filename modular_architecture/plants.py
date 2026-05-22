@@ -230,7 +230,9 @@ TOLUCA = PlantSpec(
 CELAYA_GAMESA = PlantSpec(
     key="CELAYA_GAMESA",
     jobs=[
-        # Cookies or Biscuits — 12 lines (1-12; line 13 not in Jan template)
+        # Cookies or Biscuits — 12 active lines. Factory line 8 is inactive in the RDP
+        # (row 82 has no Total Hours), so cons 7..11 skip past it: factory-line 9 -> 13
+        # map to RDP rows 83..87 and Pond lines "9".."13".
         Job("Cookies or Biscuits", "DEFAULT",  0, "1 - Alambre 1",   75, "PLANTA CELAYA", "1"),
         Job("Cookies or Biscuits", "DEFAULT",  1, "3 - Saladas 2",   76, "PLANTA CELAYA", "2",  type_value="Saladas 2"),
         Job("Cookies or Biscuits", "DEFAULT",  2, "4 - Marias",      77, "PLANTA CELAYA", "3",  type_value="Marias"),
@@ -238,11 +240,11 @@ CELAYA_GAMESA = PlantSpec(
         Job("Cookies or Biscuits", "DEFAULT",  4, "6 - Florentinas", 79, "PLANTA CELAYA", "5",  type_value="Florentinas"),
         Job("Cookies or Biscuits", "DEFAULT",  5, "8 - Alambre 6",   80, "PLANTA CELAYA", "6",  type_value="Alambre 6"),
         Job("Cookies or Biscuits", "DEFAULT",  6, "9 - Saladas 7",   81, "PLANTA CELAYA", "7",  type_value="Saladas 7"),
-        Job("Cookies or Biscuits", "DEFAULT",  7, "12 - OtrosG9",    82, "PLANTA CELAYA", "8",  type_value="OtrosG9"),
-        Job("Cookies or Biscuits", "DEFAULT",  8, "13 - Crackets",   83, "PLANTA CELAYA", "9",  type_value="Crackets"),
-        Job("Cookies or Biscuits", "DEFAULT",  9, "14 - Alambre 11", 84, "PLANTA CELAYA", "10", type_value="Alambre 11"),
-        Job("Cookies or Biscuits", "DEFAULT", 10, "15 - Chocolate",  85, "PLANTA CELAYA", "11", type_value="Chocolate"),
-        Job("Cookies or Biscuits", "DEFAULT", 11, "16 - OtrosG2",    86, "PLANTA CELAYA", "12", type_value="OtrosG2"),
+        Job("Cookies or Biscuits", "DEFAULT",  7, "12 - OtrosG9",    83, "PLANTA CELAYA", "9",  type_value="OtrosG9"),
+        Job("Cookies or Biscuits", "DEFAULT",  8, "13 - Crackets",   84, "PLANTA CELAYA", "10", type_value="Crackets"),
+        Job("Cookies or Biscuits", "DEFAULT",  9, "14 - Alambre 11", 85, "PLANTA CELAYA", "11", type_value="Alambre 11"),
+        Job("Cookies or Biscuits", "DEFAULT", 10, "15 - Chocolate",  86, "PLANTA CELAYA", "12", type_value="Chocolate"),
+        Job("Cookies or Biscuits", "DEFAULT", 11, "16 - OtrosG2",    87, "PLANTA CELAYA", "13", type_value="OtrosG2"),
 
         # Wafer — Gamesa Wafer lines carry type_value
         Job("Wafer", "DEFAULT", 0, "17 - Obleas 3", 88, "PLANTA CELAYA", "W3", type_value="Obleas 3"),
@@ -296,26 +298,47 @@ import unicodedata as _ud
 
 # Ordered list: more-specific keywords must come before single-word fallbacks
 # so "CelayaGamesa" is matched before the bare "Celaya" entry.
+#
+# Celaya naming quirk: the golden templates use "Snk_TE_Celaya (snack)" for the
+# Gamesa (cookies/wafer) site and bare "Snk_TE_Celaya" for the Sabritas site —
+# unlike Obregon/Vallejo where both halves carry an explicit suffix. So
+# "snack" tagged Celaya filenames map to GAMESA and the bare ones to SABRITAS.
 _FNAME_KEYWORDS: List[tuple] = [
-    # Two-word/compound names (Sabritas vs Gamesa disambiguation)
+    # --- Celaya: "(snack)" tag = Gamesa; bare "Celaya" = Sabritas ---
     ("celaya_gamesa",    "CELAYA_GAMESA"),
     ("celayagamesa",     "CELAYA_GAMESA"),
+    ("celaya (snack)",   "CELAYA_GAMESA"),
+    ("celaya_snack",     "CELAYA_GAMESA"),
+    ("celaya snack",     "CELAYA_GAMESA"),
+    ("celayasnack",      "CELAYA_GAMESA"),
     ("celaya_sabritas",  "CELAYA_SABRITAS"),
     ("celayasabritas",   "CELAYA_SABRITAS"),
+    # --- Vallejo: "(Gamesa)" vs "-Sabritas" ---
+    ("vallejo (gamesa)", "VALLEJO_GAMESA"),
     ("vallejo_gamesa",   "VALLEJO_GAMESA"),
     ("vallejogamesa",    "VALLEJO_GAMESA"),
+    ("vallejo-sabritas", "VALLEJO_SABRITAS"),
     ("vallejo_sabritas", "VALLEJO_SABRITAS"),
+    ("vallejo sabritas", "VALLEJO_SABRITAS"),
     ("vallejosabritas",  "VALLEJO_SABRITAS"),
+    # --- Obregon: "(Gamesa)" vs "Plant (Sabritas)" ---
+    ("obregon (gamesa)", "OBREGON_GAMESA"),
     ("obregon_gamesa",   "OBREGON_GAMESA"),
     ("obregongamesa",    "OBREGON_GAMESA"),
+    ("obregon plant",    "OBREGON_SABRITAS"),
+    ("obregon (sabritas)", "OBREGON_SABRITAS"),
     ("obregon_sabritas", "OBREGON_SABRITAS"),
+    ("obregon sabritas", "OBREGON_SABRITAS"),
     ("obregonsabritas",  "OBREGON_SABRITAS"),
+    # --- Other Sabritas plants ---
     ("sabritas_abc",     "SABRITAS_ABC"),
+    ("sabritas abc",     "SABRITAS_ABC"),
     ("sabritasabc",      "SABRITAS_ABC"),
     ("pte_128",          "SABRITAS_PTE_128"),
+    ("pte 128",          "SABRITAS_PTE_128"),
     ("pte128",           "SABRITAS_PTE_128"),
     ("mezcladotecnia",   "SABRITAS_PTE_128"),
-    # Unambiguous single-word names
+    # --- Unambiguous single-word names ---
     ("monterrey",        "MONTERREY"),
     ("guadalajara",      "GUADALAJARA"),
     ("veracruz",         "VERACRUZ"),
@@ -325,9 +348,9 @@ _FNAME_KEYWORDS: List[tuple] = [
     ("yucatan",          "MERIDA"),
     ("toluca",           "TOLUCA"),
     ("abc",              "SABRITAS_ABC"),
-    # Single-word fallbacks for ambiguous plant names
-    # (used only when no compound keyword matched above)
-    ("celaya",           "CELAYA_GAMESA"),
+    # --- Single-word fallbacks for ambiguous plant names ---
+    # Only used when no compound keyword above matched
+    ("celaya",           "CELAYA_SABRITAS"),
     ("vallejo",          "VALLEJO_GAMESA"),
     ("obregon",          "OBREGON_GAMESA"),
 ]
