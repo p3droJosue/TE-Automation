@@ -32,6 +32,11 @@ MONTERREY = PlantSpec(
 # -------------------------
 # VALLEJO-SABRITAS (7704)
 # -------------------------
+# M2 (POPPLERS) is inactive in RDP r16 (TH=None) but Pond line M2 carries one
+# real SKU this period — "P GRANEL DORITO3D PKTAXOQXOSFHB REDSOD" with
+# prod≈117,241 kg. The golden shows it at Other cons 6 (TE=0 since no
+# scheduled hours, AP=117k from the SKU). We include it so the engine
+# reproduces that AP contribution.
 VALLEJO_SABRITAS = PlantSpec(
     key="VALLEJO_SABRITAS",
     jobs=[
@@ -47,6 +52,7 @@ VALLEJO_SABRITAS = PlantSpec(
         Job("Other", "DEFAULT", 3, "19 - Sabriton 2",  13, "PLANTA MÉXICO", "G2", type_value="Others"),
         Job("Other", "DEFAULT", 4, "20 - Sabriton 3",  14, "PLANTA MÉXICO", "G3", type_value="Others"),
         Job("Other", "DEFAULT", 5, "13 - Paloma",      15, "PLANTA MÉXICO", "M1", type_value="Others"),
+        Job("Other", "DEFAULT", 6, "21 - POPPLERS",    16, "PLANTA MÉXICO", "M2"),
 
         Job("Extruded", "DEFAULT", 0, "8 - Cheetos 1",   9,  "PLANTA MÉXICO", "D1", type_value="Fried"),
         Job("Extruded", "DEFAULT", 1, "9 - Cheetos 3",   10, "PLANTA MÉXICO", "D2", type_value="Fried"),
@@ -221,12 +227,17 @@ SABRITAS_PTE_128 = PlantSpec(
 # -------------------------
 # TOLUCA (7707 Cacahuate + 8028 Dulce) — same template file
 # -------------------------
+# "DULCE - J" naming quirk: RDP row 139 is labelled 8028J1 (Pkg=14,595) but
+# the Pond rows for line J1 are all prod=0; the only J-line SKU actually
+# running is "MASA CENTROS DE ROKABOLA" on Pond line J2 (prod=14,595). The
+# golden writes J1's mandatory together with the J2 SKU, so cons 1 pulls
+# RDP r139 mandatory but pond_line "J2".
 TOLUCA = PlantSpec(
     key="TOLUCA",
     jobs=[
         # Dulce lines (8028)
         Job("Other", "DEFAULT", 0, "1 - DULCE - L", 138, "Planta toluca",           "I1", type_value="Other"),
-        Job("Other", "DEFAULT", 1, "2 - DULCE - J", 139, "Planta toluca",           "J1", type_value="Other"),
+        Job("Other", "DEFAULT", 1, "2 - DULCE - J", 139, "Planta toluca",           "J2", type_value="Other"),
 
         # Cacahuate lines (7707)
         Job("Other", "DEFAULT", 2, "5 - JT", 135, "Planta Toluca Cacahuate", "JT", type_value="Other"),
