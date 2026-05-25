@@ -111,6 +111,12 @@ class Job:
     pond_plant: str             # Pond col2 plant value (e.g. "PLANTA MÉXICO")
     pond_line: str              # Pond col3 line (e.g. "A3", "B1")
     type_value: Optional[str] = None  # writes into row7 type cell (Other/Extruded)
+    # Sabritas Pte 128 ("Mezcladotecnia") has 18–31 condimento SKUs per line,
+    # which exceeds the 12-slot product table. Set aggregate_skus=True to
+    # collapse all matching SKUs into one row whose velocity is the throughput
+    # weighted by production time (= total_prod / sum(prod_i / vel_i)).
+    aggregate_skus: bool = False
+    aggregate_name: Optional[str] = None  # SKU name to write (e.g., "CONDIMENTO L2")
 
 @dataclass(frozen=True)
 class PlantSpec:
@@ -181,13 +187,20 @@ def _load_pond_df(ws_pond: xw.Sheet, last_col: int = 47) -> pd.DataFrame:
 # =========================
 # Pond extractors
 # =========================
-def pond_default_names_velprod(df: pd.DataFrame, plant: str, line: str) -> Tuple[List[str], List[float]]:
+def pond_default_names_velprod(df: pd.DataFrame, plant: str, line: str,
+                               aggregate: bool = False,
+                               agg_name: Optional[str] = None) -> Tuple[List[str], List[float]]:
     """
     DEFAULT & TC use:
       - name: col5 (E) => c5
       - vel : col7 (G) => c7
       - prod: col8 (H) => c8
       Filter: plant (col2=c2), line (col3=c3), prod>0
+
+    If aggregate=True (used for Sabritas Pte 128 / Mezcladotecnia where each
+    line has dozens of condimento SKUs), the matching rows are collapsed into
+    a single entry: one name, the throughput weighted by production time, and
+    the total production.
     """
     if df.empty:
         return [], []
@@ -204,6 +217,16 @@ def pond_default_names_velprod(df: pd.DataFrame, plant: str, line: str) -> Tuple
     names = d["c5"].fillna("").astype(str).tolist()
     vel = pd.to_numeric(d["c7"], errors="coerce").fillna(0).tolist()
     prod = pd.to_numeric(d["c8"], errors="coerce").fillna(0).tolist()
+
+    if aggregate:
+        total_prod = sum(prod)
+        total_time = sum(p / v for p, v in zip(prod, vel) if v and v > 0)
+        if total_time <= 0:
+            return [], []
+        weighted_vel = total_prod / total_time
+        name = agg_name or f"CONDIMENTO {line}"
+        return [name], [weighted_vel, total_prod]
+
     return names, vel + prod
 
 def pond_pc_names_velprod(df: pd.DataFrame, ws_pond: xw.Sheet, template_location: str,
@@ -438,6 +461,37 @@ def _write_pc(ws: xw.Sheet, cons: int, mandatory: List[Any], optional: List[Any]
     _write_optional(ws, cons, ROWS_OPT_PC, optional, first_to_col7=17, second_from=18, second_to=23, second_col5=True)
 
 # =========================
+# Stale-data cleanup
+# =========================
+_PRODUCT_SHEETS = ("PC", "TC", "Extruded", "Other", "Cookies or Biscuits", "Wafer")
+_MAX_BLOCKS = 15  # templates have up to 15 (cons 0..14)
+
+def _clear_unused_sheets(wb_tpl: xw.Book, plant: PlantSpec) -> None:
+    """
+    Run All overwrites templates in place. If a file was previously filled
+    using a different PlantSpec (e.g. the bare "Snk_TE_Celaya" file was
+    matched to CELAYA_GAMESA by an earlier code version and got Cookies/Wafer
+    data, then is re-run as CELAYA_SABRITAS), the sheets the new spec doesn't
+    touch keep the old data and contaminate the Summary.
+
+    For each product sheet not used by *plant*, zero out the input cells the
+    engine writes (SKU table + Total Hours per block). The template's formulas
+    cascade those to 0, so the Summary reflects only the new spec's contribution.
+    """
+    used_sheets = {job.sheet for job in plant.jobs}
+    sheets_in_wb = {s.name for s in wb_tpl.sheets}
+    for sheet_name in _PRODUCT_SHEETS:
+        if sheet_name in used_sheets or sheet_name not in sheets_in_wb:
+            continue
+        ws = wb_tpl.sheets[sheet_name]
+        for cons in range(_MAX_BLOCKS):
+            sumador = BLOCK_WIDTH * cons
+            ws.range((18, 3 + sumador)).value = None  # Total Hours
+            ws.range((44, 2 + sumador), (87, 2 + sumador)).value = None  # SKU names
+            ws.range((44, 7 + sumador), (87, 7 + sumador)).value = None  # velocities
+            ws.range((60, 3 + sumador), (87, 3 + sumador)).value = None  # productions
+
+# =========================
 # Engine runner
 # =========================
 def default_out_path(blank_path: str) -> str:
@@ -473,6 +527,9 @@ def fill_plant(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, v
 
         df_pond = _load_pond_df(ws_pond, last_col=47)
 
+        # Wipe stale data left by a prior fill that used a different PlantSpec.
+        _clear_unused_sheets(wb_tpl, plant)
+
         # PC template location is needed for PC extra params
         pc_location = None
         if "PC" in [s.name for s in wb_tpl.sheets]:
@@ -496,13 +553,19 @@ def fill_plant(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, v
                 _write_pc(ws, job.cons, mandatory, optional, names, vel_prod)
 
             elif job.kind.upper() == "TC":
-                names, vel_prod = pond_default_names_velprod(df_pond, job.pond_plant, job.pond_line)
+                names, vel_prod = pond_default_names_velprod(
+                    df_pond, job.pond_plant, job.pond_line,
+                    aggregate=job.aggregate_skus, agg_name=job.aggregate_name,
+                )
                 _write_mandatory(ws, job.cons, ROWS_TEMPLATE_TC, mandatory)
                 _write_optional(ws, job.cons, ROWS_OPT_TC, optional, first_to_col7=18, second_from=19, second_to=23, second_col5=True, last_write_val=0)
                 _write_tc_sku(ws, job.cons, names, vel_prod)
 
             else:  # DEFAULT
-                names, vel_prod = pond_default_names_velprod(df_pond, job.pond_plant, job.pond_line)
+                names, vel_prod = pond_default_names_velprod(
+                    df_pond, job.pond_plant, job.pond_line,
+                    aggregate=job.aggregate_skus, agg_name=job.aggregate_name,
+                )
                 _write_mandatory(ws, job.cons, ROWS_TEMPLATE_DEFAULT, mandatory)
 
                 if job.sheet in ("Cookies or Biscuits", "Wafer"):

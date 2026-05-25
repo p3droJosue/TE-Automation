@@ -32,6 +32,11 @@ MONTERREY = PlantSpec(
 # -------------------------
 # VALLEJO-SABRITAS (7704)
 # -------------------------
+# M2 (POPPLERS) is inactive in RDP r16 (TH=None) but Pond line M2 carries one
+# real SKU this period — "P GRANEL DORITO3D PKTAXOQXOSFHB REDSOD" with
+# prod≈117,241 kg. The golden shows it at Other cons 6 (TE=0 since no
+# scheduled hours, AP=117k from the SKU). We include it so the engine
+# reproduces that AP contribution.
 VALLEJO_SABRITAS = PlantSpec(
     key="VALLEJO_SABRITAS",
     jobs=[
@@ -47,6 +52,7 @@ VALLEJO_SABRITAS = PlantSpec(
         Job("Other", "DEFAULT", 3, "19 - Sabriton 2",  13, "PLANTA MÉXICO", "G2", type_value="Others"),
         Job("Other", "DEFAULT", 4, "20 - Sabriton 3",  14, "PLANTA MÉXICO", "G3", type_value="Others"),
         Job("Other", "DEFAULT", 5, "13 - Paloma",      15, "PLANTA MÉXICO", "M1", type_value="Others"),
+        Job("Other", "DEFAULT", 6, "21 - POPPLERS",    16, "PLANTA MÉXICO", "M2"),
 
         Job("Extruded", "DEFAULT", 0, "8 - Cheetos 1",   9,  "PLANTA MÉXICO", "D1", type_value="Fried"),
         Job("Extruded", "DEFAULT", 1, "9 - Cheetos 3",   10, "PLANTA MÉXICO", "D2", type_value="Fried"),
@@ -185,36 +191,53 @@ MERIDA = PlantSpec(
 # -------------------------
 # SABRITAS ABC (7753)
 # -------------------------
+# Other has three blocks in the golden: N1 (active), Avenas/A3 (placeholder
+# inactive — no production), and H1 (intermittent; Z_INACTIVE_H1 header but
+# carries real production when run). RDP row 190 is the H1 line.
 SABRITAS_ABC = PlantSpec(
     key="SABRITAS_ABC",
     jobs=[
-        Job("Extruded",            "DEFAULT", 0, "1 - Colmillo",    73,  "Planta ABC", "E2", type_value="Baked"),
-        Job("Cookies or Biscuits", "DEFAULT", 0, "3 - Minimarias",  125, "Planta ABC", "E1", type_value="Minimarias"),
-        Job("Other",               "DEFAULT", 0, "6 - N1",          141, "Planta ABC", "N1", type_value="Other"),
+        Job("Extruded",            "DEFAULT", 0, "1 - Colmillo",         73,  "Planta ABC", "E2", type_value="Baked"),
+        Job("Cookies or Biscuits", "DEFAULT", 0, "3 - Minimarias",       125, "Planta ABC", "E1", type_value="Minimarias"),
+        Job("Other",               "DEFAULT", 0, "6 - N1",               141, "Planta ABC", "N1", type_value="Other"),
+        Job("Other",               "DEFAULT", 1, "4 - Avenas",           189, "Planta ABC", "A3"),
+        Job("Other",               "DEFAULT", 2, "8 - Z_INACTIVE_H1",    190, "Planta ABC", "H1", type_value="Other"),
     ]
 )
 
 # -------------------------
 # SABRITAS PTE 128 / MEZCLADOTECNIA (7709)
 # -------------------------
+# Each Mezcladotecnia line ships 18–31 "CONDIMENTO …" SKUs per period, which
+# blows past the template's 12-slot product table. aggregate_skus=True
+# collapses them to one synthetic SKU per block with the throughput-weighted
+# velocity — same shape the golden Jan/Feb files use.
 SABRITAS_PTE_128 = PlantSpec(
     key="SABRITAS_PTE_128",
     jobs=[
-        Job("Other", "DEFAULT", 0, "1 - L1", 143, "PLANTA MEZCLADOTECNIA", "L1", type_value="Other"),
-        Job("Other", "DEFAULT", 1, "2 - L2", 144, "PLANTA MEZCLADOTECNIA", "L2"),
-        Job("Other", "DEFAULT", 2, "3 - L3", 145, "PLANTA MEZCLADOTECNIA", "L3"),
+        Job("Other", "DEFAULT", 0, "1 - L1", 143, "PLANTA MEZCLADOTECNIA", "L1", type_value="Other",
+            aggregate_skus=True, aggregate_name="CONDIMENTO L1"),
+        Job("Other", "DEFAULT", 1, "2 - L2", 144, "PLANTA MEZCLADOTECNIA", "L2",
+            aggregate_skus=True, aggregate_name="CONDIMENTO L2"),
+        Job("Other", "DEFAULT", 2, "3 - L3", 145, "PLANTA MEZCLADOTECNIA", "L3",
+            aggregate_skus=True, aggregate_name="CONDIMENTO L3"),
     ]
 )
 
 # -------------------------
 # TOLUCA (7707 Cacahuate + 8028 Dulce) — same template file
 # -------------------------
+# "DULCE - J" naming quirk: RDP row 139 is labelled 8028J1 (Pkg=14,595) but
+# the Pond rows for line J1 are all prod=0; the only J-line SKU actually
+# running is "MASA CENTROS DE ROKABOLA" on Pond line J2 (prod=14,595). The
+# golden writes J1's mandatory together with the J2 SKU, so cons 1 pulls
+# RDP r139 mandatory but pond_line "J2".
 TOLUCA = PlantSpec(
     key="TOLUCA",
     jobs=[
         # Dulce lines (8028)
         Job("Other", "DEFAULT", 0, "1 - DULCE - L", 138, "Planta toluca",           "I1", type_value="Other"),
-        Job("Other", "DEFAULT", 1, "2 - DULCE - J", 139, "Planta toluca",           "J1", type_value="Other"),
+        Job("Other", "DEFAULT", 1, "2 - DULCE - J", 139, "Planta toluca",           "J2", type_value="Other"),
 
         # Cacahuate lines (7707)
         Job("Other", "DEFAULT", 2, "5 - JT", 135, "Planta Toluca Cacahuate", "JT", type_value="Other"),
