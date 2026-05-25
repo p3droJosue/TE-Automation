@@ -185,24 +185,36 @@ MERIDA = PlantSpec(
 # -------------------------
 # SABRITAS ABC (7753)
 # -------------------------
+# Other has three blocks in the golden: N1 (active), Avenas/A3 (placeholder
+# inactive — no production), and H1 (intermittent; Z_INACTIVE_H1 header but
+# carries real production when run). RDP row 190 is the H1 line.
 SABRITAS_ABC = PlantSpec(
     key="SABRITAS_ABC",
     jobs=[
-        Job("Extruded",            "DEFAULT", 0, "1 - Colmillo",    73,  "Planta ABC", "E2", type_value="Baked"),
-        Job("Cookies or Biscuits", "DEFAULT", 0, "3 - Minimarias",  125, "Planta ABC", "E1", type_value="Minimarias"),
-        Job("Other",               "DEFAULT", 0, "6 - N1",          141, "Planta ABC", "N1", type_value="Other"),
+        Job("Extruded",            "DEFAULT", 0, "1 - Colmillo",         73,  "Planta ABC", "E2", type_value="Baked"),
+        Job("Cookies or Biscuits", "DEFAULT", 0, "3 - Minimarias",       125, "Planta ABC", "E1", type_value="Minimarias"),
+        Job("Other",               "DEFAULT", 0, "6 - N1",               141, "Planta ABC", "N1", type_value="Other"),
+        Job("Other",               "DEFAULT", 1, "4 - Avenas",           189, "Planta ABC", "A3"),
+        Job("Other",               "DEFAULT", 2, "8 - Z_INACTIVE_H1",    190, "Planta ABC", "H1", type_value="Other"),
     ]
 )
 
 # -------------------------
 # SABRITAS PTE 128 / MEZCLADOTECNIA (7709)
 # -------------------------
+# Each Mezcladotecnia line ships 18–31 "CONDIMENTO …" SKUs per period, which
+# blows past the template's 12-slot product table. aggregate_skus=True
+# collapses them to one synthetic SKU per block with the throughput-weighted
+# velocity — same shape the golden Jan/Feb files use.
 SABRITAS_PTE_128 = PlantSpec(
     key="SABRITAS_PTE_128",
     jobs=[
-        Job("Other", "DEFAULT", 0, "1 - L1", 143, "PLANTA MEZCLADOTECNIA", "L1", type_value="Other"),
-        Job("Other", "DEFAULT", 1, "2 - L2", 144, "PLANTA MEZCLADOTECNIA", "L2"),
-        Job("Other", "DEFAULT", 2, "3 - L3", 145, "PLANTA MEZCLADOTECNIA", "L3"),
+        Job("Other", "DEFAULT", 0, "1 - L1", 143, "PLANTA MEZCLADOTECNIA", "L1", type_value="Other",
+            aggregate_skus=True, aggregate_name="CONDIMENTO L1"),
+        Job("Other", "DEFAULT", 1, "2 - L2", 144, "PLANTA MEZCLADOTECNIA", "L2",
+            aggregate_skus=True, aggregate_name="CONDIMENTO L2"),
+        Job("Other", "DEFAULT", 2, "3 - L3", 145, "PLANTA MEZCLADOTECNIA", "L3",
+            aggregate_skus=True, aggregate_name="CONDIMENTO L3"),
     ]
 )
 
