@@ -484,12 +484,22 @@ def _clear_unused_sheets(wb_tpl: xw.Book, plant: PlantSpec) -> None:
         if sheet_name in used_sheets or sheet_name not in sheets_in_wb:
             continue
         ws = wb_tpl.sheets[sheet_name]
-        for cons in range(_MAX_BLOCKS):
-            sumador = BLOCK_WIDTH * cons
-            ws.range((18, 3 + sumador)).value = None  # Total Hours
-            ws.range((44, 2 + sumador), (87, 2 + sumador)).value = None  # SKU names
-            ws.range((44, 7 + sumador), (87, 7 + sumador)).value = None  # velocities
-            ws.range((60, 3 + sumador), (87, 3 + sumador)).value = None  # productions
+        # Unused product sheets keep their cells locked under sheet protection
+        # (only the used sheets' input cells are unlocked by the template).
+        # Drop protection, wipe, restore it so the output matches the original.
+        was_protected = bool(ws.api.ProtectContents)
+        if was_protected:
+            ws.api.Unprotect()
+        try:
+            for cons in range(_MAX_BLOCKS):
+                sumador = BLOCK_WIDTH * cons
+                ws.range((18, 3 + sumador)).value = None  # Total Hours
+                ws.range((44, 2 + sumador), (87, 2 + sumador)).value = None  # SKU names
+                ws.range((44, 7 + sumador), (87, 7 + sumador)).value = None  # velocities
+                ws.range((60, 3 + sumador), (87, 3 + sumador)).value = None  # productions
+        finally:
+            if was_protected:
+                ws.api.Protect()
 
 # =========================
 # Engine runner
@@ -589,6 +599,15 @@ def fill_plant(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, v
         wb_db.close()
 
     finally:
-        app.screen_updating = True
-        app.display_alerts = True
-        app.quit()
+        # Each call may COM-throw if Excel is in a modal/busy state from an
+        # earlier failure. Swallow individually so app.quit() always runs —
+        # otherwise the orphaned Excel process locks files for the next plant.
+        for cleanup in (
+            lambda: setattr(app, "screen_updating", True),
+            lambda: setattr(app, "display_alerts", True),
+            app.quit,
+        ):
+            try:
+                cleanup()
+            except Exception:
+                pass
