@@ -484,12 +484,16 @@ def _clear_unused_sheets(wb_tpl: xw.Book, plant: PlantSpec) -> None:
         if sheet_name in used_sheets or sheet_name not in sheets_in_wb:
             continue
         ws = wb_tpl.sheets[sheet_name]
-        # Unused product sheets keep their cells locked under sheet protection
-        # (only the used sheets' input cells are unlocked by the template).
-        # Drop protection, wipe, restore it so the output matches the original.
+        # Drop sheet protection so we can wipe locked input cells, then restore.
+        # Pass "" so Excel doesn't pop the password dialog: if the sheet has a
+        # real password, Unprotect throws and we skip — locked cells can't have
+        # accumulated stale data from a previous fill anyway.
         was_protected = bool(ws.api.ProtectContents)
         if was_protected:
-            ws.api.Unprotect()
+            try:
+                ws.api.Unprotect("")
+            except Exception:
+                continue
         try:
             for cons in range(_MAX_BLOCKS):
                 sumador = BLOCK_WIDTH * cons
@@ -499,7 +503,10 @@ def _clear_unused_sheets(wb_tpl: xw.Book, plant: PlantSpec) -> None:
                 ws.range((60, 3 + sumador), (87, 3 + sumador)).value = None  # productions
         finally:
             if was_protected:
-                ws.api.Protect()
+                try:
+                    ws.api.Protect()
+                except Exception:
+                    pass
 
 # =========================
 # Engine runner
