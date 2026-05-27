@@ -538,7 +538,10 @@ def fill_plant(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, v
         ws_pond = _pick_sheet(wb_db, "Pond", [])
 
         hdr = _rdp_header_map(ws_rdp, header_row=2, max_cols=2000)
-        missing = [h for h in (MANDATORY_HEADERS + OPTIONAL_HEADERS) if str(h).strip() not in hdr]
+        # Only mandatory headers gate the run — optional ones (e.g. A005/A003/SKUS)
+        # are dropped from some monthly DBs (FEB 2026 lost them) and the downstream
+        # writers already treat a missing optional as None (leaves the cell blank).
+        missing = [h for h in MANDATORY_HEADERS if str(h).strip() not in hdr]
         if missing:
             raise ValueError(f"RDP headers missing: {missing}")
 
