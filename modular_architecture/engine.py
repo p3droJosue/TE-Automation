@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -523,7 +525,59 @@ def default_out_path(blank_path: str) -> str:
         base = f"{root}_Filled{ext}"
     return os.path.join(folder, base)
 
+def _is_onedrive_path(path: str) -> bool:
+    """OneDrive's sync agent acquires file locks while a workbook is open in
+    Excel — when an automated save fires those operations COM-throw
+    "Cannot access '<file>'". Detect any OneDrive folder, both personal
+    ("OneDrive") and tenant-scoped ("OneDrive - <Org>"), by substring.
+    """
+    return "onedrive" in (path or "").lower()
+
+
 def fill_plant(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, visible: bool = False) -> None:
+    """Run the fill, staging through a local temp folder when any input
+    lives on OneDrive. The core engine then operates on plain local files
+    that the sync agent can't touch, and we copy the result back to the
+    OneDrive location as a single write at the end.
+
+    Excel COM occasionally throws "Cannot access '<file>'" after the
+    workbook has already been written to disk (most often when OneDrive's
+    sync agent grabs the file the instant save returns). To avoid flagging
+    those runs as failed, we snapshot the output file's mtime before
+    starting and treat an exception as a success if the file has been
+    rewritten in the meantime.
+    """
+    mtime_before = (
+        os.path.getmtime(out_path) if os.path.exists(out_path) else 0.0
+    )
+
+    try:
+        if (_is_onedrive_path(blank_path)
+                or _is_onedrive_path(db_path)
+                or _is_onedrive_path(out_path)):
+            with tempfile.TemporaryDirectory(prefix="te_filler_") as tmpdir:
+                local_db  = os.path.join(tmpdir, "db_"  + os.path.basename(db_path))
+                local_tpl = os.path.join(tmpdir, "tpl_" + os.path.basename(blank_path))
+                shutil.copy2(db_path, local_db)
+                shutil.copy2(blank_path, local_tpl)
+                _fill_plant_core(local_db, local_tpl, local_tpl, plant, visible)
+                shutil.copy2(local_tpl, out_path)
+        else:
+            _fill_plant_core(db_path, blank_path, out_path, plant, visible)
+    except Exception:
+        # If the output file's mtime advanced during this call the bytes
+        # are on disk — whatever COM error fired afterwards (OneDrive lock
+        # races, Excel close hiccups, etc.) shouldn't mark the run failed.
+        try:
+            if (os.path.exists(out_path)
+                    and os.path.getmtime(out_path) > mtime_before + 0.5):
+                return
+        except OSError:
+            pass
+        raise
+
+
+def _fill_plant_core(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, visible: bool = False) -> None:
     app = xw.App(visible=visible, add_book=False)
     app.display_alerts = False
     app.screen_updating = False
