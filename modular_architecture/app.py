@@ -5,21 +5,26 @@ import json
 import os
 import sys
 import threading
-import traceback
-from datetime import datetime
 
 import customtkinter as ctk
+from PIL import Image
 from tkinter import filedialog
 
 from engine import fill_plant
 from plants import REGISTRY, find_templates, match_filename
 
-# ── Appearance ────────────────────────────────────────────────────────────────
+
+def _resource_path(rel_path: str) -> str:
+    """Resolve an asset path that works in dev and inside a PyInstaller bundle."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel_path)
+
+
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-# ── Config persistence ────────────────────────────────────────────────────────
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
 
 def _load_config() -> dict:
     try:
@@ -27,6 +32,7 @@ def _load_config() -> dict:
             return json.load(f)
     except Exception:
         return {}
+
 
 def _save_config(cfg: dict) -> None:
     try:
@@ -36,9 +42,129 @@ def _save_config(cfg: dict) -> None:
         pass
 
 
-# Per-line status icon shown after the timestamp. Empty tag (sub-items, blank
-# spacer rows) gets a space so timestamps stay aligned with iconed lines.
-_TAG_ICONS = {"info": "▸", "success": "✓", "error": "✗"}
+# ── Apple-style status palette ────────────────────────────────────────────────
+# Soft tinted backgrounds + saturated text. Each color is (light, dark).
+_STATUS = {
+    "idle":    {"bg": ("#e5e5ea", "#3a3a3c"), "fg": ("#3c3c43", "#ebebf5"), "label": "Ready"},
+    "pending": {"bg": ("#e5e5ea", "#3a3a3c"), "fg": ("#6e6e73", "#aeaeb2"), "label": "Pending"},
+    "running": {"bg": ("#cce4ff", "#1a3a6e"), "fg": ("#0a84ff", "#64a6ff"), "label": "Running"},
+    "done":    {"bg": ("#d1f4d8", "#1b4a2c"), "fg": ("#1b8a3a", "#30d158"), "label": "Done"},
+    "failed":  {"bg": ("#ffd6d6", "#5a1d1d"), "fg": ("#cf222e", "#ff453a"), "label": "Failed"},
+}
+
+_STATE_ICONS = {"idle": "▢", "pending": "○", "running": "◌", "done": "✓", "failed": "✗"}
+
+
+def _short_error(msg: str) -> str:
+    """Trim a Python exception to a one-line, user-friendly summary."""
+    line = (msg or "").strip().splitlines()[0]
+    for pref in ("ValueError:", "RuntimeError:", "Exception:",
+                 "OSError:", "FileNotFoundError:", "PermissionError:"):
+        if line.startswith(pref):
+            line = line[len(pref):].strip()
+            break
+    low = line.lower()
+    if "rdp headers missing" in low:
+        return "Database is missing required columns."
+    if ("another program" in low or "permission denied" in low
+            or "being used by" in low or "in use" in low):
+        return "Template file is open in Excel — close it and try again."
+    if "no such file" in low or "cannot find" in low:
+        return "File not found. Check the path."
+    return line[:200] if len(line) > 200 else line
+
+
+# ── Status widgets ────────────────────────────────────────────────────────────
+class StatusPill(ctk.CTkLabel):
+    """Compact colored pill showing a single state."""
+
+    def __init__(self, master):
+        super().__init__(
+            master, text=_STATUS["pending"]["label"],
+            width=90, height=24,
+            corner_radius=12,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=_STATUS["pending"]["bg"],
+            text_color=_STATUS["pending"]["fg"],
+        )
+
+    def set_state(self, state: str, text: str | None = None) -> None:
+        cfg = _STATUS.get(state, _STATUS["pending"])
+        self.configure(
+            text=text or cfg["label"],
+            fg_color=cfg["bg"],
+            text_color=cfg["fg"],
+        )
+
+
+class PlantStatusRow(ctk.CTkFrame):
+    """One row in the Run All list: plant name + brief detail + status pill."""
+
+    def __init__(self, master, plant_key: str):
+        super().__init__(master, fg_color=("gray95", "gray17"), corner_radius=10)
+        self.plant_key = plant_key
+        self.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            self,
+            text=plant_key.replace("_", " ").title(),
+            font=ctk.CTkFont(size=13, weight="bold"),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=14, pady=10)
+
+        self._detail = ctk.CTkLabel(
+            self, text="",
+            text_color=("gray40", "gray65"),
+            font=ctk.CTkFont(size=11),
+            anchor="w",
+        )
+        self._detail.grid(row=0, column=1, sticky="w", padx=4, pady=10)
+
+        self._pill = StatusPill(self)
+        self._pill.grid(row=0, column=2, padx=14, pady=10, sticky="e")
+
+    def set_state(self, state: str, detail: str = "") -> None:
+        self._pill.set_state(state)
+        self._detail.configure(text=detail)
+
+
+class StatusCard(ctk.CTkFrame):
+    """Hero status card for the single-plant tab."""
+
+    def __init__(self, master):
+        super().__init__(master, corner_radius=14, fg_color=("gray95", "gray17"))
+        self.grid_columnconfigure(1, weight=1)
+
+        self._icon = ctk.CTkLabel(
+            self, text=_STATE_ICONS["idle"],
+            font=ctk.CTkFont(size=40, weight="bold"),
+            width=64,
+            text_color=_STATUS["idle"]["fg"],
+        )
+        self._icon.grid(row=0, column=0, rowspan=2, padx=(22, 12), pady=22)
+
+        self._title = ctk.CTkLabel(
+            self, text="Ready",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            anchor="w",
+        )
+        self._title.grid(row=0, column=1, sticky="ew", pady=(22, 2), padx=(0, 22))
+
+        self._detail = ctk.CTkLabel(
+            self, text="Select files and click Run Fill.",
+            text_color=("gray40", "gray70"),
+            font=ctk.CTkFont(size=12),
+            anchor="w",
+            wraplength=600,
+            justify="left",
+        )
+        self._detail.grid(row=1, column=1, sticky="ew", pady=(0, 22), padx=(0, 22))
+
+    def set_state(self, state: str, title: str, detail: str = "") -> None:
+        cfg = _STATUS.get(state, _STATUS["idle"])
+        self._icon.configure(text=_STATE_ICONS.get(state, "▢"), text_color=cfg["fg"])
+        self._title.configure(text=title)
+        self._detail.configure(text=detail)
 
 
 # ── Main App ──────────────────────────────────────────────────────────────────
@@ -49,13 +175,16 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("TE Template Filler — Mexico")
-        self.geometry("1000x640")
-        self.minsize(900, 580)
+        self.geometry("1000x720")
+        self.minsize(900, 620)
         self.resizable(True, True)
 
         self._cfg = _load_config()
         self._running = False
         self._selected_plant: str | None = None
+
+        self._batch_rows: dict[str, PlantStatusRow] = {}
+        self._batch_matches: list[tuple[str, str]] = []
 
         self._build_layout()
         self._restore_state()
@@ -74,17 +203,28 @@ class App(ctk.CTk):
         sb.grid_propagate(False)
         sb.grid_rowconfigure(99, weight=1)
 
+        logo_path = _resource_path("assets/pepsico_logo.png")
+        if os.path.exists(logo_path):
+            self._logo_img = ctk.CTkImage(
+                light_image=Image.open(logo_path),
+                dark_image=Image.open(logo_path),
+                size=(160, 48),
+            )
+            ctk.CTkLabel(sb, image=self._logo_img, text="").grid(
+                row=0, column=0, padx=16, pady=(18, 8), sticky="w"
+            )
+
         ctk.CTkLabel(
             sb, text="TE Filler", font=ctk.CTkFont(size=20, weight="bold")
-        ).grid(row=0, column=0, padx=16, pady=(20, 4), sticky="w")
+        ).grid(row=1, column=0, padx=16, pady=(4, 4), sticky="w")
         ctk.CTkLabel(
             sb, text="Mexico Sites", font=ctk.CTkFont(size=12), text_color="gray"
-        ).grid(row=1, column=0, padx=16, pady=(0, 16), sticky="w")
+        ).grid(row=2, column=0, padx=16, pady=(0, 16), sticky="w")
 
         ctk.CTkLabel(
             sb, text="SELECT PLANT", font=ctk.CTkFont(size=10, weight="bold"),
             text_color="gray"
-        ).grid(row=2, column=0, padx=16, pady=(0, 4), sticky="w")
+        ).grid(row=3, column=0, padx=16, pady=(0, 4), sticky="w")
 
         plants = sorted(REGISTRY.keys())
         self._plant_btns: dict[str, ctk.CTkButton] = {}
@@ -99,18 +239,25 @@ class App(ctk.CTk):
                 corner_radius=6,
                 command=lambda k=key: self._select_plant(k),
             )
-            btn.grid(row=3 + i, column=0, padx=8, pady=2, sticky="ew")
+            btn.grid(row=4 + i, column=0, padx=8, pady=2, sticky="ew")
             self._plant_btns[key] = btn
 
-        ctk.CTkLabel(sb, text="", text_color="gray").grid(
-            row=98, column=0, padx=16, pady=4, sticky="w"
-        )
-        self._theme_switch = ctk.CTkSwitch(
-            sb, text="Light mode",
+        # Apple-style pill button at the bottom — toggles light/dark.
+        self._theme_btn = ctk.CTkButton(
+            sb, text="", width=168, height=34, corner_radius=18,
+            fg_color=("gray88", "gray22"),
+            text_color=("gray10", "gray90"),
+            hover_color=("gray80", "gray32"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._toggle_theme,
-            onvalue="light", offvalue="dark"
         )
-        self._theme_switch.grid(row=100, column=0, padx=16, pady=(4, 20), sticky="w")
+        self._theme_btn.grid(row=100, column=0, padx=16, pady=(4, 20), sticky="w")
+        self._sync_theme_button()
+
+    def _sync_theme_button(self):
+        """Show the *next* action so the user knows what the click will do."""
+        is_dark = ctk.get_appearance_mode().lower() == "dark"
+        self._theme_btn.configure(text="☀  Light mode" if is_dark else "☾  Dark mode")
 
     def _build_main(self):
         main = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
@@ -173,21 +320,11 @@ class App(ctk.CTk):
         self._run_btn.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(0, 8))
 
         self._progress = ctk.CTkProgressBar(parent, mode="indeterminate")
-        self._progress.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        self._progress.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 12))
         self._progress.set(0)
 
-        log_frame = ctk.CTkFrame(parent)
-        log_frame.grid(row=7, column=0, columnspan=3, sticky="nsew")
-        log_frame.grid_rowconfigure(0, weight=1)
-        log_frame.grid_columnconfigure(0, weight=1)
-
-        self._log = ctk.CTkTextbox(log_frame, font=ctk.CTkFont(size=13))
-        self._log.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
-        self._log.configure(state="disabled")
-
-        ctk.CTkLabel(
-            parent, text="Log", font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
-        ).grid(row=7, column=0, columnspan=3, sticky="nw", padx=4, pady=(4, 0))
+        self._status_card = StatusCard(parent)
+        self._status_card.grid(row=7, column=0, columnspan=3, sticky="nsew")
 
     # ── Batch tab (Run All) ───────────────────────────────────────────────────
     def _build_batch_tab(self, parent):
@@ -243,27 +380,62 @@ class App(ctk.CTk):
         self._batch_progress.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         self._batch_progress.set(0)
 
-        # Matched-files label
-        self._batch_status_label = ctk.CTkLabel(
-            parent, text="", font=ctk.CTkFont(size=11), text_color="gray", anchor="w"
+        self._batch_summary = ctk.CTkLabel(
+            parent,
+            text="No templates loaded yet.",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            anchor="w",
         )
-        self._batch_status_label.grid(row=6, column=0, columnspan=3, sticky="w", padx=4)
+        self._batch_summary.grid(row=6, column=0, columnspan=3, sticky="w", padx=4, pady=(2, 8))
 
-        log_frame = ctk.CTkFrame(parent)
-        log_frame.grid(row=7, column=0, columnspan=3, sticky="nsew")
-        log_frame.grid_rowconfigure(0, weight=1)
-        log_frame.grid_columnconfigure(0, weight=1)
+        self._batch_list = ctk.CTkScrollableFrame(
+            parent, label_text="", fg_color="transparent",
+        )
+        self._batch_list.grid(row=7, column=0, columnspan=3, sticky="nsew")
+        self._batch_list.grid_columnconfigure(0, weight=1)
 
-        self._batch_log = ctk.CTkTextbox(log_frame, font=ctk.CTkFont(size=13))
-        self._batch_log.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
-        self._batch_log.configure(state="disabled")
+    # ── Batch row management ──────────────────────────────────────────────────
+    def _rebuild_batch_rows(self, matches: list[tuple[str, str]]) -> None:
+        for child in self._batch_list.winfo_children():
+            child.destroy()
+        self._batch_rows = {}
+        self._batch_matches = list(matches)
 
-        ctk.CTkLabel(
-            parent, text="Log", font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
-        ).grid(row=7, column=0, columnspan=3, sticky="nw", padx=4, pady=(4, 0))
+        if not matches:
+            self._batch_summary.configure(
+                text="No matching templates in folder.",
+                text_color=_STATUS["failed"]["fg"],
+            )
+            return
+
+        self._batch_summary.configure(
+            text=f"{len(matches)} template(s) ready",
+            text_color=("gray10", "gray90"),
+        )
+
+        for i, (key, fpath) in enumerate(matches):
+            row = PlantStatusRow(self._batch_list, key)
+            row.grid(row=i, column=0, sticky="ew", padx=2, pady=3)
+            row.set_state("pending", os.path.basename(fpath))
+            self._batch_rows[key] = row
+
+    def _update_batch_summary(self, done: int, failed: int, total: int) -> None:
+        pending = total - done - failed
+        parts = [f"{done}/{total} done"]
+        if failed:
+            parts.append(f"{failed} failed")
+        if pending:
+            parts.append(f"{pending} pending")
+        color = _STATUS["failed"]["fg"] if failed else ("gray10", "gray90")
+        self._batch_summary.configure(text=" • ".join(parts), text_color=color)
 
     # ── State / restore ───────────────────────────────────────────────────────
     def _restore_state(self):
+        mode = self._cfg.get("appearance_mode", "dark")
+        if mode in ("light", "dark"):
+            ctk.set_appearance_mode(mode)
+            self._sync_theme_button()
+
         db = self._cfg.get("last_db", "")
         if db and os.path.exists(db):
             self._db_var.set(db)
@@ -272,6 +444,7 @@ class App(ctk.CTk):
         folder = self._cfg.get("last_folder", "")
         if folder and os.path.isdir(folder):
             self._batch_folder_var.set(folder)
+            self._preview_matches()
 
         last_plant = self._cfg.get("last_plant")
         if last_plant and last_plant in REGISTRY:
@@ -299,7 +472,7 @@ class App(ctk.CTk):
         )
         if path:
             self._db_var.set(path)
-            self._batch_db_var.set(path)   # keep both in sync
+            self._batch_db_var.set(path)
             self._cfg["last_db"] = path
             _save_config(self._cfg)
 
@@ -319,7 +492,7 @@ class App(ctk.CTk):
         )
         if path:
             self._batch_db_var.set(path)
-            self._db_var.set(path)         # keep both in sync
+            self._db_var.set(path)
             self._cfg["last_db"] = path
             _save_config(self._cfg)
 
@@ -329,75 +502,16 @@ class App(ctk.CTk):
             self._batch_folder_var.set(folder)
             self._cfg["last_folder"] = folder
             _save_config(self._cfg)
-            self._preview_matches()        # auto-preview on folder pick
+            self._preview_matches()
 
     # ── Preview matches ───────────────────────────────────────────────────────
     def _preview_matches(self):
         folder = self._batch_folder_var.get().strip()
         if not folder or not os.path.isdir(folder):
-            self._batch_status_label.configure(
-                text="No folder selected.", text_color="gray"
-            )
+            self._batch_summary.configure(text="No folder selected.", text_color="gray")
+            self._rebuild_batch_rows([])
             return
-
-        matches = find_templates(folder)
-        if not matches:
-            self._batch_status_label.configure(
-                text="No matching .xlsm templates found in folder.", text_color="#f85149"
-            )
-            self._batch_log_clear()
-            return
-
-        self._batch_status_label.configure(
-            text=f"{len(matches)} template(s) matched — ready to run.",
-            text_color="#3fb950"
-        )
-        self._batch_log_clear()
-        self._batch_log_write(f"Matched {len(matches)} template(s):", "info")
-        for key, fpath in matches:
-            self._batch_log_write(
-                f"  {key:<22}  {os.path.basename(fpath)}", ""
-            )
-
-    # ── Logging — single plant ────────────────────────────────────────────────
-    def _log_write(self, msg: str, tag: str = ""):
-        ts = datetime.now().strftime("%H:%M:%S")
-        icon = _TAG_ICONS.get(tag, " ")
-        self._log.configure(state="normal")
-        self._log.insert("end", f"[{ts}] {icon} {msg}\n")
-        if tag:
-            start = self._log.index("end - 1 lines linestart")
-            self._log.tag_add(tag, start, "end - 1c")
-            self._log.tag_config("error",   foreground="#f85149")
-            self._log.tag_config("success", foreground="#3fb950")
-            self._log.tag_config("info",    foreground="#58a6ff")
-        self._log.see("end")
-        self._log.configure(state="disabled")
-
-    def _log_clear(self):
-        self._log.configure(state="normal")
-        self._log.delete("1.0", "end")
-        self._log.configure(state="disabled")
-
-    # ── Logging — batch ───────────────────────────────────────────────────────
-    def _batch_log_write(self, msg: str, tag: str = ""):
-        ts = datetime.now().strftime("%H:%M:%S")
-        icon = _TAG_ICONS.get(tag, " ")
-        self._batch_log.configure(state="normal")
-        self._batch_log.insert("end", f"[{ts}] {icon} {msg}\n")
-        if tag:
-            start = self._batch_log.index("end - 1 lines linestart")
-            self._batch_log.tag_add(tag, start, "end - 1c")
-            self._batch_log.tag_config("error",   foreground="#f85149")
-            self._batch_log.tag_config("success", foreground="#3fb950")
-            self._batch_log.tag_config("info",    foreground="#58a6ff")
-        self._batch_log.see("end")
-        self._batch_log.configure(state="disabled")
-
-    def _batch_log_clear(self):
-        self._batch_log.configure(state="normal")
-        self._batch_log.delete("1.0", "end")
-        self._batch_log.configure(state="disabled")
+        self._rebuild_batch_rows(find_templates(folder))
 
     # ── Run — single plant ────────────────────────────────────────────────────
     def _run(self):
@@ -409,20 +523,29 @@ class App(ctk.CTk):
         plant_key = self._selected_plant
 
         if not db or not os.path.exists(db):
-            self._log_write("ERROR: Please select a valid Database (.xlsm) file.", "error")
+            self._status_card.set_state(
+                "failed", "Missing database",
+                "Pick a valid .xlsm database file before running.",
+            )
             return
         if not blank or not os.path.exists(blank):
-            self._log_write("ERROR: Please select a valid Template (.xlsm) file.", "error")
+            self._status_card.set_state(
+                "failed", "Missing template",
+                "Pick a valid .xlsm template file before running.",
+            )
             return
         if not plant_key or plant_key not in REGISTRY:
-            self._log_write("ERROR: Please select a plant from the sidebar.", "error")
+            self._status_card.set_state(
+                "failed", "No plant selected",
+                "Choose a plant from the sidebar first.",
+            )
             return
 
-        self._log_clear()
-        self._log_write(f"Starting fill for: {plant_key}", "info")
-        self._log_write(f"DB:       {db}", "info")
-        self._log_write(f"Template: {blank}", "info")
-        self._log_write("Working…", "info")
+        pretty = plant_key.replace("_", " ").title()
+        self._status_card.set_state(
+            "running", f"Filling {pretty}…",
+            "This usually takes 30–60 seconds. Excel runs in the background.",
+        )
 
         self._running = True
         self._run_btn.configure(state="disabled", text="Running…")
@@ -435,7 +558,7 @@ class App(ctk.CTk):
                            visible=self._visible_var.get())
                 self.after(0, self._on_success, blank)
             except Exception as exc:
-                self.after(0, self._on_error, str(exc), traceback.format_exc())
+                self.after(0, self._on_error, str(exc))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -444,18 +567,21 @@ class App(ctk.CTk):
         self._progress.set(1)
         self._run_btn.configure(state="normal", text="Run Fill")
         self._running = False
-        self._log_write(f"Done!  Saved: {os.path.basename(out_path)}", "success")
+        pretty = (self._selected_plant or "").replace("_", " ").title()
+        self._status_card.set_state(
+            "done", f"{pretty} — Done",
+            f"Saved {os.path.basename(out_path)}.",
+        )
 
-    def _on_error(self, short: str, full: str):
+    def _on_error(self, exc_msg: str):
         self._progress.stop()
         self._progress.set(0)
         self._run_btn.configure(state="normal", text="Run Fill")
         self._running = False
-        self._log_write(f"ERROR: {short}", "error")
-        self._log.configure(state="normal")
-        self._log.insert("end", full + "\n")
-        self._log.see("end")
-        self._log.configure(state="disabled")
+        self._status_card.set_state(
+            "failed", "Something went wrong",
+            _short_error(exc_msg),
+        )
 
     # ── Run All ───────────────────────────────────────────────────────────────
     def _run_all(self):
@@ -466,24 +592,27 @@ class App(ctk.CTk):
         folder = self._batch_folder_var.get().strip()
 
         if not db or not os.path.exists(db):
-            self._batch_log_write("ERROR: Please select a valid Database (.xlsm) file.", "error")
+            self._batch_summary.configure(
+                text="Missing database — pick a .xlsm file.",
+                text_color=_STATUS["failed"]["fg"],
+            )
             return
         if not folder or not os.path.isdir(folder):
-            self._batch_log_write("ERROR: Please select a valid templates folder.", "error")
+            self._batch_summary.configure(
+                text="Missing templates folder.",
+                text_color=_STATUS["failed"]["fg"],
+            )
             return
 
         matches = find_templates(folder)
         if not matches:
-            self._batch_log_write(
-                "No matching .xlsm templates found in the selected folder.", "error"
+            self._batch_summary.configure(
+                text="No matching .xlsm templates in folder.",
+                text_color=_STATUS["failed"]["fg"],
             )
             return
 
-        self._batch_log_clear()
-        self._batch_log_write(f"Starting batch run — {len(matches)} plant(s):", "info")
-        for key, fpath in matches:
-            self._batch_log_write(f"  {key}: {os.path.basename(fpath)}", "info")
-        self._batch_log_write("", "")
+        self._rebuild_batch_rows(matches)
 
         self._running = True
         self._run_all_btn.configure(state="disabled", text="Running…")
@@ -493,48 +622,45 @@ class App(ctk.CTk):
 
         def _worker():
             done = 0
-            errors: list[tuple[str, str]] = []
+            failed = 0
 
             for i, (key, fpath) in enumerate(matches, start=1):
-                self.after(0, self._batch_log_write,
-                           f"[{i}/{total}] {key} …", "info")
+                self.after(0, self._mark_row, key, "running", "Working…")
                 try:
                     fill_plant(db, fpath, fpath, REGISTRY[key],
                                visible=self._batch_visible_var.get())
                     done += 1
-                    self.after(0, self._batch_log_write,
-                               f"        → saved: {os.path.basename(fpath)}", "success")
+                    self.after(0, self._mark_row, key, "done",
+                               os.path.basename(fpath))
                 except Exception as exc:
-                    errors.append((key, str(exc)))
-                    self.after(0, self._batch_log_write,
-                               f"        ERROR: {exc}", "error")
-                    self.after(0, self._batch_log_write,
-                               traceback.format_exc(), "error")
-
+                    failed += 1
+                    self.after(0, self._mark_row, key, "failed",
+                               _short_error(str(exc)))
                 self.after(0, self._batch_progress.set, i / total)
+                self.after(0, self._update_batch_summary, done, failed, total)
 
-            self.after(0, self._on_batch_done, done, total, errors)
+            self.after(0, self._on_batch_done, done, failed, total)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_batch_done(self, done: int, total: int, errors: list):
+    def _mark_row(self, key: str, state: str, detail: str = "") -> None:
+        row = self._batch_rows.get(key)
+        if row is not None:
+            row.set_state(state, detail)
+
+    def _on_batch_done(self, done: int, failed: int, total: int) -> None:
         self._running = False
         self._run_all_btn.configure(state="normal", text="Run All")
-        self._batch_log_write("", "")
-        if errors:
-            self._batch_log_write(
-                f"Completed {done}/{total} plants.  {len(errors)} error(s):", "error"
-            )
-            for key, msg in errors:
-                self._batch_log_write(f"  {key}: {msg}", "error")
-        else:
-            self._batch_log_write(
-                f"All {total} plants completed successfully!", "success"
-            )
+        self._update_batch_summary(done, failed, total)
 
     # ── Theme toggle ──────────────────────────────────────────────────────────
     def _toggle_theme(self):
-        ctk.set_appearance_mode(self._theme_switch.get())
+        is_dark = ctk.get_appearance_mode().lower() == "dark"
+        new_mode = "light" if is_dark else "dark"
+        ctk.set_appearance_mode(new_mode)
+        self._sync_theme_button()
+        self._cfg["appearance_mode"] = new_mode
+        _save_config(self._cfg)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
