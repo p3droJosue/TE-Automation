@@ -36,6 +36,11 @@ def _save_config(cfg: dict) -> None:
         pass
 
 
+# Per-line status icon shown after the timestamp. Empty tag (sub-items, blank
+# spacer rows) gets a space so timestamps stay aligned with iconed lines.
+_TAG_ICONS = {"info": "▸", "success": "✓", "error": "✗"}
+
+
 # ── Main App ──────────────────────────────────────────────────────────────────
 class App(ctk.CTk):
     SIDEBAR_W = 200
@@ -176,7 +181,7 @@ class App(ctk.CTk):
         log_frame.grid_rowconfigure(0, weight=1)
         log_frame.grid_columnconfigure(0, weight=1)
 
-        self._log = ctk.CTkTextbox(log_frame, font=ctk.CTkFont(family="Courier", size=12))
+        self._log = ctk.CTkTextbox(log_frame, font=ctk.CTkFont(size=13))
         self._log.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
         self._log.configure(state="disabled")
 
@@ -249,9 +254,7 @@ class App(ctk.CTk):
         log_frame.grid_rowconfigure(0, weight=1)
         log_frame.grid_columnconfigure(0, weight=1)
 
-        self._batch_log = ctk.CTkTextbox(
-            log_frame, font=ctk.CTkFont(family="Courier", size=12)
-        )
+        self._batch_log = ctk.CTkTextbox(log_frame, font=ctk.CTkFont(size=13))
         self._batch_log.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
         self._batch_log.configure(state="disabled")
 
@@ -359,8 +362,9 @@ class App(ctk.CTk):
     # ── Logging — single plant ────────────────────────────────────────────────
     def _log_write(self, msg: str, tag: str = ""):
         ts = datetime.now().strftime("%H:%M:%S")
+        icon = _TAG_ICONS.get(tag, " ")
         self._log.configure(state="normal")
-        self._log.insert("end", f"[{ts}] {msg}\n")
+        self._log.insert("end", f"[{ts}] {icon} {msg}\n")
         if tag:
             start = self._log.index("end - 1 lines linestart")
             self._log.tag_add(tag, start, "end - 1c")
@@ -378,8 +382,9 @@ class App(ctk.CTk):
     # ── Logging — batch ───────────────────────────────────────────────────────
     def _batch_log_write(self, msg: str, tag: str = ""):
         ts = datetime.now().strftime("%H:%M:%S")
+        icon = _TAG_ICONS.get(tag, " ")
         self._batch_log.configure(state="normal")
-        self._batch_log.insert("end", f"[{ts}] {msg}\n")
+        self._batch_log.insert("end", f"[{ts}] {icon} {msg}\n")
         if tag:
             start = self._batch_log.index("end - 1 lines linestart")
             self._batch_log.tag_add(tag, start, "end - 1c")
