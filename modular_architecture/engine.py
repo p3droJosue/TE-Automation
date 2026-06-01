@@ -605,8 +605,18 @@ def fill_plant(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, v
         wb_tpl.app.api.CalculateFull()
         wb_tpl.save(out_path)
 
-        wb_tpl.close()
-        wb_db.close()
+        # File is on disk. Close is best-effort: when the workbook lives on
+        # OneDrive the sync agent often grabs a lock the instant save finishes,
+        # and Excel's Close() then COM-throws "Cannot access '<file>'". Letting
+        # that propagate would mark a correctly-saved plant as Failed.
+        try:
+            wb_tpl.close()
+        except Exception:
+            pass
+        try:
+            wb_db.close()
+        except Exception:
+            pass
 
     finally:
         # Each call may COM-throw if Excel is in a modal/busy state from an
