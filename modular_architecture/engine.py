@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -523,7 +525,35 @@ def default_out_path(blank_path: str) -> str:
         base = f"{root}_Filled{ext}"
     return os.path.join(folder, base)
 
+def _is_onedrive_path(path: str) -> bool:
+    """OneDrive's sync agent acquires file locks while a workbook is open in
+    Excel — when an automated save fires those operations COM-throw
+    "Cannot access '<file>'". Detect any OneDrive folder, both personal
+    ("OneDrive") and tenant-scoped ("OneDrive - <Org>"), by substring.
+    """
+    return "onedrive" in (path or "").lower()
+
+
 def fill_plant(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, visible: bool = False) -> None:
+    """Run the fill, staging through a local temp folder when any input
+    lives on OneDrive. The core engine then operates on plain local files
+    that the sync agent can't touch, and we copy the result back to the
+    OneDrive location as a single write at the end."""
+    if (_is_onedrive_path(blank_path)
+            or _is_onedrive_path(db_path)
+            or _is_onedrive_path(out_path)):
+        with tempfile.TemporaryDirectory(prefix="te_filler_") as tmpdir:
+            local_db  = os.path.join(tmpdir, "db_"  + os.path.basename(db_path))
+            local_tpl = os.path.join(tmpdir, "tpl_" + os.path.basename(blank_path))
+            shutil.copy2(db_path, local_db)
+            shutil.copy2(blank_path, local_tpl)
+            _fill_plant_core(local_db, local_tpl, local_tpl, plant, visible)
+            shutil.copy2(local_tpl, out_path)
+    else:
+        _fill_plant_core(db_path, blank_path, out_path, plant, visible)
+
+
+def _fill_plant_core(db_path: str, blank_path: str, out_path: str, plant: PlantSpec, visible: bool = False) -> None:
     app = xw.App(visible=visible, add_book=False)
     app.display_alerts = False
     app.screen_updating = False
