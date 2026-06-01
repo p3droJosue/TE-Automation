@@ -9,10 +9,17 @@ import traceback
 from datetime import datetime
 
 import customtkinter as ctk
+from PIL import Image
 from tkinter import filedialog
 
 from engine import fill_plant
 from plants import REGISTRY, find_templates, match_filename
+
+
+def _resource_path(rel_path: str) -> str:
+    """Resolve an asset path that works in dev and inside a PyInstaller bundle."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel_path)
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -74,17 +81,31 @@ class App(ctk.CTk):
         sb.grid_propagate(False)
         sb.grid_rowconfigure(99, weight=1)
 
+        # CTkImage needs a reference held on self — otherwise tkinter GCs it
+        # mid-render and the label goes blank. Skip silently if the file is
+        # missing so a fresh checkout without assets still launches.
+        logo_path = _resource_path("assets/pepsico_logo.png")
+        if os.path.exists(logo_path):
+            self._logo_img = ctk.CTkImage(
+                light_image=Image.open(logo_path),
+                dark_image=Image.open(logo_path),
+                size=(160, 48),
+            )
+            ctk.CTkLabel(sb, image=self._logo_img, text="").grid(
+                row=0, column=0, padx=16, pady=(18, 8), sticky="w"
+            )
+
         ctk.CTkLabel(
             sb, text="TE Filler", font=ctk.CTkFont(size=20, weight="bold")
-        ).grid(row=0, column=0, padx=16, pady=(20, 4), sticky="w")
+        ).grid(row=1, column=0, padx=16, pady=(4, 4), sticky="w")
         ctk.CTkLabel(
             sb, text="Mexico Sites", font=ctk.CTkFont(size=12), text_color="gray"
-        ).grid(row=1, column=0, padx=16, pady=(0, 16), sticky="w")
+        ).grid(row=2, column=0, padx=16, pady=(0, 16), sticky="w")
 
         ctk.CTkLabel(
             sb, text="SELECT PLANT", font=ctk.CTkFont(size=10, weight="bold"),
             text_color="gray"
-        ).grid(row=2, column=0, padx=16, pady=(0, 4), sticky="w")
+        ).grid(row=3, column=0, padx=16, pady=(0, 4), sticky="w")
 
         plants = sorted(REGISTRY.keys())
         self._plant_btns: dict[str, ctk.CTkButton] = {}
@@ -99,7 +120,7 @@ class App(ctk.CTk):
                 corner_radius=6,
                 command=lambda k=key: self._select_plant(k),
             )
-            btn.grid(row=3 + i, column=0, padx=8, pady=2, sticky="ew")
+            btn.grid(row=4 + i, column=0, padx=8, pady=2, sticky="ew")
             self._plant_btns[key] = btn
 
         ctk.CTkLabel(sb, text="", text_color="gray").grid(

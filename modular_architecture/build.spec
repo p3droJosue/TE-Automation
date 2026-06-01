@@ -18,6 +18,12 @@ datas = []
 # CustomTkinter bundles its own theme JSON/image assets — they MUST be included
 datas += collect_data_files("customtkinter")
 
+# Bundle our own assets/ (logo, future icons) so _resource_path can find them
+# at sys._MEIPASS/assets/ when the EXE is run.
+assets_dir = HERE / "assets"
+if assets_dir.exists():
+    datas += [(str(assets_dir / f.name), "assets") for f in assets_dir.iterdir() if f.is_file()]
+
 # Optional: app icon (place a .ico file in assets/)
 icon_path = str(HERE / "assets" / "icon.ico")
 icon_arg  = icon_path if Path(icon_path).exists() else None
