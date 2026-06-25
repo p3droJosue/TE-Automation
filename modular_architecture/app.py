@@ -175,7 +175,11 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("TE Template Filler — Mexico")
-        self.geometry("1000x720")
+        # Default size is large enough to show the full sidebar (logo + 15
+        # plants + theme button) plus the main panel without scrolling. The
+        # user can still maximize or resize; the sidebar plant list scrolls
+        # when the window is too short to fit everything.
+        self.geometry("1150x820")
         self.minsize(900, 620)
         self.resizable(True, True)
 
@@ -201,7 +205,12 @@ class App(ctk.CTk):
         sb = ctk.CTkFrame(self, width=self.SIDEBAR_W, corner_radius=0)
         sb.grid(row=0, column=0, sticky="nsew")
         sb.grid_propagate(False)
-        sb.grid_rowconfigure(99, weight=1)
+        sb.grid_columnconfigure(0, weight=1)
+        # Row 4 (the scrollable plant list) absorbs extra vertical space so
+        # the theme button on row 5 always stays pinned to the bottom — fixes
+        # the EXE-build issue where 15 plants + header pushed the theme
+        # button below the visible area at default window heights.
+        sb.grid_rowconfigure(4, weight=1)
 
         logo_path = _resource_path("assets/pepsico_logo.png")
         if os.path.exists(logo_path):
@@ -226,11 +235,17 @@ class App(ctk.CTk):
             text_color="gray"
         ).grid(row=3, column=0, padx=16, pady=(0, 4), sticky="w")
 
+        plant_list = ctk.CTkScrollableFrame(
+            sb, fg_color="transparent", label_text="",
+        )
+        plant_list.grid(row=4, column=0, sticky="nsew", padx=4, pady=0)
+        plant_list.grid_columnconfigure(0, weight=1)
+
         plants = sorted(REGISTRY.keys())
         self._plant_btns: dict[str, ctk.CTkButton] = {}
         for i, key in enumerate(plants):
             btn = ctk.CTkButton(
-                sb,
+                plant_list,
                 text=key.replace("_", " ").title(),
                 anchor="w",
                 fg_color="transparent",
@@ -239,10 +254,10 @@ class App(ctk.CTk):
                 corner_radius=6,
                 command=lambda k=key: self._select_plant(k),
             )
-            btn.grid(row=4 + i, column=0, padx=8, pady=2, sticky="ew")
+            btn.grid(row=i, column=0, padx=4, pady=2, sticky="ew")
             self._plant_btns[key] = btn
 
-        # Apple-style pill button at the bottom — toggles light/dark.
+        # Apple-style pill button anchored to the bottom — toggles light/dark.
         self._theme_btn = ctk.CTkButton(
             sb, text="", width=168, height=34, corner_radius=18,
             fg_color=("gray88", "gray22"),
@@ -251,7 +266,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._toggle_theme,
         )
-        self._theme_btn.grid(row=100, column=0, padx=16, pady=(4, 20), sticky="w")
+        self._theme_btn.grid(row=5, column=0, padx=16, pady=(8, 20), sticky="w")
         self._sync_theme_button()
 
     def _sync_theme_button(self):
