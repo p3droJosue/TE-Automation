@@ -206,11 +206,13 @@ class App(ctk.CTk):
         sb.grid(row=0, column=0, sticky="nsew")
         sb.grid_propagate(False)
         sb.grid_columnconfigure(0, weight=1)
-        # Row 4 (the scrollable plant list) absorbs extra vertical space so
-        # the theme button on row 5 always stays pinned to the bottom — fixes
-        # the EXE-build issue where 15 plants + header pushed the theme
-        # button below the visible area at default window heights.
-        sb.grid_rowconfigure(4, weight=1)
+        # Row 5 (the spacer) absorbs extra height so the theme button on row
+        # 6 stays glued to the very bottom of the sidebar. Row 4 (plant list)
+        # is fixed-height so the button is visible at any window size — when
+        # the user shrinks the window below the natural list height, the
+        # list scrolls inside its own frame rather than pushing the button
+        # off-screen.
+        sb.grid_rowconfigure(5, weight=1)
 
         logo_path = _resource_path("assets/pepsico_logo.png")
         if os.path.exists(logo_path):
@@ -235,10 +237,13 @@ class App(ctk.CTk):
             text_color="gray"
         ).grid(row=3, column=0, padx=16, pady=(0, 4), sticky="w")
 
+        # Fixed height (~10 plant buttons + scrollbar) keeps the theme
+        # button reachable. sticky="new" + height= constrains the frame so
+        # it doesn't expand vertically with the window.
         plant_list = ctk.CTkScrollableFrame(
-            sb, fg_color="transparent", label_text="",
+            sb, fg_color="transparent", label_text="", height=360,
         )
-        plant_list.grid(row=4, column=0, sticky="nsew", padx=4, pady=0)
+        plant_list.grid(row=4, column=0, sticky="new", padx=4, pady=0)
         plant_list.grid_columnconfigure(0, weight=1)
 
         plants = sorted(REGISTRY.keys())
@@ -266,7 +271,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._toggle_theme,
         )
-        self._theme_btn.grid(row=5, column=0, padx=16, pady=(8, 20), sticky="w")
+        self._theme_btn.grid(row=6, column=0, padx=16, pady=(8, 20), sticky="w")
         self._sync_theme_button()
 
     def _sync_theme_button(self):
