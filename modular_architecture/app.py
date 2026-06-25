@@ -206,13 +206,11 @@ class App(ctk.CTk):
         sb.grid(row=0, column=0, sticky="nsew")
         sb.grid_propagate(False)
         sb.grid_columnconfigure(0, weight=1)
-        # Row 5 (the spacer) absorbs extra height so the theme button on row
-        # 6 stays glued to the very bottom of the sidebar. Row 4 (plant list)
-        # is fixed-height so the button is visible at any window size — when
-        # the user shrinks the window below the natural list height, the
-        # list scrolls inside its own frame rather than pushing the button
-        # off-screen.
-        sb.grid_rowconfigure(5, weight=1)
+        # Row 6 (spacer) absorbs extra height so the plant list sits snug
+        # under the SELECT PLANT header. The theme button lives in the top
+        # section (row 3) so it's visible at any window size — putting it
+        # at the bottom of the sidebar made it disappear on short windows.
+        sb.grid_rowconfigure(6, weight=1)
 
         logo_path = _resource_path("assets/pepsico_logo.png")
         if os.path.exists(logo_path):
@@ -230,20 +228,32 @@ class App(ctk.CTk):
         ).grid(row=1, column=0, padx=16, pady=(4, 4), sticky="w")
         ctk.CTkLabel(
             sb, text="Mexico Sites", font=ctk.CTkFont(size=12), text_color="gray"
-        ).grid(row=2, column=0, padx=16, pady=(0, 16), sticky="w")
+        ).grid(row=2, column=0, padx=16, pady=(0, 12), sticky="w")
+
+        # Theme toggle lives in the top section so the user can always see
+        # it, even when the window is short or the plant list overflows.
+        self._theme_btn = ctk.CTkButton(
+            sb, text="", width=168, height=34, corner_radius=18,
+            fg_color=("gray88", "gray22"),
+            text_color=("gray10", "gray90"),
+            hover_color=("gray80", "gray32"),
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._toggle_theme,
+        )
+        self._theme_btn.grid(row=3, column=0, padx=16, pady=(0, 16), sticky="w")
+        self._sync_theme_button()
 
         ctk.CTkLabel(
             sb, text="SELECT PLANT", font=ctk.CTkFont(size=10, weight="bold"),
             text_color="gray"
-        ).grid(row=3, column=0, padx=16, pady=(0, 4), sticky="w")
+        ).grid(row=4, column=0, padx=16, pady=(0, 4), sticky="w")
 
-        # Fixed height (~10 plant buttons + scrollbar) keeps the theme
-        # button reachable. sticky="new" + height= constrains the frame so
-        # it doesn't expand vertically with the window.
+        # Fixed height (~10 plant buttons + scrollbar) keeps the sidebar
+        # predictable. sticky="new" + height= prevents vertical stretching.
         plant_list = ctk.CTkScrollableFrame(
             sb, fg_color="transparent", label_text="", height=360,
         )
-        plant_list.grid(row=4, column=0, sticky="new", padx=4, pady=0)
+        plant_list.grid(row=5, column=0, sticky="new", padx=4, pady=0)
         plant_list.grid_columnconfigure(0, weight=1)
 
         plants = sorted(REGISTRY.keys())
@@ -261,18 +271,6 @@ class App(ctk.CTk):
             )
             btn.grid(row=i, column=0, padx=4, pady=2, sticky="ew")
             self._plant_btns[key] = btn
-
-        # Apple-style pill button anchored to the bottom — toggles light/dark.
-        self._theme_btn = ctk.CTkButton(
-            sb, text="", width=168, height=34, corner_radius=18,
-            fg_color=("gray88", "gray22"),
-            text_color=("gray10", "gray90"),
-            hover_color=("gray80", "gray32"),
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._toggle_theme,
-        )
-        self._theme_btn.grid(row=6, column=0, padx=16, pady=(8, 20), sticky="w")
-        self._sync_theme_button()
 
     def _sync_theme_button(self):
         """Show the *next* action so the user knows what the click will do."""
